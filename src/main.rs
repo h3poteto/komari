@@ -1,3 +1,12 @@
+use structopt::StructOpt;
+
+#[derive(StructOpt)]
+struct Cli {
+    owner: String,
+    repo: String,
+}
+
 fn main() {
-    println!("Hello, world!");
+    let args = Cli::from_args();
+    println!("repository is {}/{}", args.owner, args.repo);
 }
