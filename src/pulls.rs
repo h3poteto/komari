@@ -2,26 +2,58 @@ use github_rs::client::{Executor, Github};
 use serde_json::Value;
 use github_rs::errors::Error;
 
-pub fn list(owner: &String, repo: &String) -> Result<Option<Value>, Error> {
+pub enum PullsError {
+    GitHubError {
+        error: Error,
+    },
+
+    JsonError {
+        error: String,
+    }
+}
+
+impl From<Error> for PullsError {
+    fn from(error: Error) -> Self {
+        PullsError::GitHubError { error }
+    }
+}
+
+impl From<JsonError> for PullsError {
+    fn from(err: JsonError) -> Self {
+        PullsError::JsonError { error: err.error }
+    }
+}
+
+struct JsonError {
+    error: String,
+}
+
+impl JsonError {
+    fn new(err: String) -> JsonError {
+        JsonError {
+            error: err,
+        }
+    }
+}
+
+
+pub fn list(owner: &String, repo: &String) -> Result<Option<Value>, PullsError> {
     let github_token = env!("GITHUB_TOKEN");
     let client = Github::new(github_token).unwrap();
 
     // https://github.com/github-rs/github-rs/blob/master/src/repos/get.rs#L265
     // Pulls does not provide reference parameter, so we can't provide query parameter.
     let pulls_url = format!("repos/{}/{}/pulls?state=closed&sort=updated&direction=desc", owner, repo);
-    let response = client.get().custom_endpoint(&pulls_url).execute::<Value>();
+    let response = client.get().custom_endpoint(&pulls_url).execute::<Value>()?;
+    let (headers, status, json) = response;
 
-    match response {
-        Ok((headers, status, json)) => {
-            if let Some(json) = json {
-                return Ok(Some(json))
-            }
-            println!("{:#?}", headers);
-            println!("{}", status);
-            Ok(None)
-        },
-        Err(e) => Err(e),
+    if let Some(json) = json {
+        return Ok(Some(json))
     }
+    println!("{:#?}", headers);
+    println!("{}", status);
+    let err: JsonError = JsonError::new("json is empty".to_string());
+    Err(err.into())
 }
 
 pub fn select(array: &Vec<Value>, since: &i64) -> Vec<Value> {
