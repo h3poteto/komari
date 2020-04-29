@@ -13,11 +13,18 @@ pub fn list(owner: &String, repo: &String) -> Result<Option<Value>, Error> {
 
     match response {
         Ok((headers, status, json)) => {
+            if let Some(json) = json {
+                return Ok(Some(json))
+            }
             println!("{:#?}", headers);
             println!("{}", status);
-            Ok(json)
+            Ok(None)
         },
         Err(e) => Err(e),
     }
 }
 
+pub fn select(array: &Vec<Value>, since: &i64) -> Vec<Value> {
+    let res: Vec<Value> = array.iter().filter(|a| a["number"].as_i64().unwrap() > *since).cloned().collect();
+    res
+}
