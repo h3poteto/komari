@@ -1,6 +1,7 @@
 use github_rs::client::{Executor, Github};
 use serde_json::Value;
 use github_rs::errors::Error;
+use std::env;
 
 pub enum PullsError {
     GitHubError {
@@ -9,6 +10,10 @@ pub enum PullsError {
 
     JsonError {
         error: String,
+    },
+
+    EnvError {
+        error: env::VarError,
     }
 }
 
@@ -21,6 +26,12 @@ impl From<Error> for PullsError {
 impl From<JsonError> for PullsError {
     fn from(err: JsonError) -> Self {
         PullsError::JsonError { error: err.error }
+    }
+}
+
+impl From<env::VarError> for PullsError {
+    fn from(error: env::VarError) -> Self {
+        PullsError::EnvError { error }
     }
 }
 
@@ -38,7 +49,7 @@ impl JsonError {
 
 
 pub fn list(owner: &String, repo: &String) -> Result<Option<Value>, PullsError> {
-    let github_token = env!("GITHUB_TOKEN");
+    let github_token = env::var("GITHUB_TOKEN")?;
     let client = Github::new(github_token).unwrap();
 
     // https://github.com/github-rs/github-rs/blob/master/src/repos/get.rs#L265
