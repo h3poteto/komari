@@ -68,6 +68,6 @@ pub fn list(owner: &String, repo: &String) -> Result<Option<Value>, PullsError> 
 }
 
 pub fn select(array: &Vec<Value>, since: &i64) -> Vec<Value> {
-    let res: Vec<Value> = array.iter().filter(|a| a["number"].as_i64().unwrap() > *since).cloned().collect();
+    let res: Vec<Value> = array.iter().filter(|a| a["number"].as_i64().unwrap() > *since && a["merged_at"].is_string()).cloned().collect();
     res
 }
