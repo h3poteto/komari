@@ -103,7 +103,11 @@ impl Pulls {
 
     pub fn select(&self, array: &Vec<Value>, number: &i64) -> Result<Vec<Value>, PullsError> {
         let since = self.get(number)?;
-        if let Some(Ok(since_date)) = since["merged_at"].as_str().map(|m| DateTime::parse_from_rfc3339(&m)) {
+        if let Ok(since_date) = since["merged_at"]
+            .as_str()
+            .ok_or("error".to_owned())
+            .and_then(|m| DateTime::parse_from_rfc3339(&m).map_err(|e| e.to_string()))
+        {
             let res: Vec<Value> = array
                 .iter()
                 .filter(|a| {
@@ -120,10 +124,8 @@ impl Pulls {
 
     fn time_diff(&self, since: DateTime<FixedOffset>, time: &str) -> bool {
         match DateTime::parse_from_rfc3339(time) {
-            Ok(t) => {
-                since.lt(&t)
-            },
-            Err(_e) => false
+            Ok(t) => since.lt(&t),
+            Err(_e) => false,
         }
     }
 }
