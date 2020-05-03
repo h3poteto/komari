@@ -2,6 +2,7 @@ use chrono::{DateTime, FixedOffset};
 use github_rs::client::{Executor, Github};
 use github_rs::errors::Error;
 use github_rs::HeaderMap;
+use regex::Regex;
 use serde_json::Value;
 use std::env;
 
@@ -126,7 +127,16 @@ impl Pulls {
         {
             let next: Option<String> = Some("next".to_string());
             if let Some(value) = link.get(&next) {
-                return Ok(value.uri.to_string());
+                let uri = value.uri.to_string().clone();
+                let re = Regex::new(r"^https://api\.github\.com/(.*)$").unwrap();
+                return re
+                    .captures(&uri)
+                    .ok_or(LinkError::new("could not found url".to_string()))
+                    .and_then(|r| {
+                        r.get(1)
+                            .ok_or(LinkError::new("failed to parse url".to_string()))
+                    })
+                    .map(|p| p.as_str().to_string());
             }
         }
         let err: LinkError = LinkError::new("link not found".to_string());
