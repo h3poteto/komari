@@ -16,13 +16,13 @@ fn main() {
     println!("select newer than #{}", args.since);
 
     match pulls::Pulls::new(&args.owner, &args.repo) {
-        Ok(client) => match client.list_pulls_since(&args.since) {
-            Ok(array) => match client.select(&array, &args.since) {
-                Ok(res) => {
-                    view::display(&res);
-                }
-                Err(e) => panic!(e),
-            },
+        Ok(client) => match client
+            .list_pulls_since(&args.since)
+            .and_then(|array| client.select(&array, &args.since))
+        {
+            Ok(res) => {
+                view::display(&res);
+            }
             Err(e) => panic!(e),
         },
         Err(e) => panic!(e),
