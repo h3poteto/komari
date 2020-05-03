@@ -1,30 +1,33 @@
 use chrono::{DateTime, FixedOffset};
 use github_rs::client::{Executor, Github};
-use github_rs::errors::Error;
+use github_rs::errors;
 use github_rs::HeaderMap;
 use regex::Regex;
 use serde_json::Value;
 use std::env;
+use std::error::Error;
+use std::fmt;
 
+#[derive(Debug)]
 pub enum PullsError {
-    GitHubError { error: Error },
+    GitHubError { error: errors::Error },
 
-    JsonError { error: String },
+    JsonError { error: JsonError },
 
     EnvError { error: env::VarError },
 
-    LinkError { error: String },
+    LinkError { error: LinkError },
 }
 
-impl From<Error> for PullsError {
-    fn from(error: Error) -> Self {
+impl From<errors::Error> for PullsError {
+    fn from(error: errors::Error) -> Self {
         PullsError::GitHubError { error }
     }
 }
 
 impl From<JsonError> for PullsError {
     fn from(err: JsonError) -> Self {
-        PullsError::JsonError { error: err.error }
+        PullsError::JsonError { error: err }
     }
 }
 
@@ -36,11 +39,43 @@ impl From<env::VarError> for PullsError {
 
 impl From<LinkError> for PullsError {
     fn from(err: LinkError) -> Self {
-        PullsError::LinkError { error: err.error }
+        PullsError::LinkError { error: err }
     }
 }
 
-struct JsonError {
+impl fmt::Display for PullsError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PullsError::GitHubError { error: err } => write!(f, "GitHub error: {}", err),
+            PullsError::JsonError { error: err } => write!(f, "Json error: {}", err),
+            PullsError::EnvError { error: err } => write!(f, "Env error: {}", err),
+            PullsError::LinkError { error: err } => write!(f, "Link error: {}", err),
+        }
+    }
+}
+
+impl Error for PullsError {
+    fn description(&self) -> &str {
+        match self {
+            PullsError::GitHubError { error: err } => err.description(),
+            PullsError::JsonError { error: err } => err.description(),
+            PullsError::EnvError { error: err } => err.description(),
+            PullsError::LinkError { error: err } => err.description(),
+        }
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        match self {
+            PullsError::GitHubError { error: err } => Some(err),
+            PullsError::JsonError { error: err } => Some(err),
+            PullsError::EnvError { error: err } => Some(err),
+            PullsError::LinkError { error: err } => Some(err),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct JsonError {
     error: String,
 }
 
@@ -50,13 +85,46 @@ impl JsonError {
     }
 }
 
-struct LinkError {
+impl fmt::Display for JsonError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl Error for JsonError {
+    fn description(&self) -> &str {
+        &self.error
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        None
+    }
+}
+
+#[derive(Debug)]
+pub struct LinkError {
     error: String,
 }
 
 impl LinkError {
     fn new(err: String) -> LinkError {
         LinkError { error: err }
+    }
+}
+
+impl fmt::Display for LinkError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl Error for LinkError {
+    fn description(&self) -> &str {
+        &self.error
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        None
     }
 }
 
@@ -89,7 +157,11 @@ impl Pulls {
 
     fn list(&self, url: &String, since: &i64) -> Result<Vec<Value>, PullsError> {
         let response = self.client.get().custom_endpoint(&url).execute::<Value>()?;
-        let (headers, _status, json) = response;
+        let (headers, status, json) = response;
+        if !status.is_success() {
+            let err: JsonError = JsonError::new(format!("Status code is {}", status.as_u16()));
+            return Err(err.into());
+        }
 
         if let Some(json) = json {
             if let Some(array) = json.as_array() {

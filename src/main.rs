@@ -23,7 +23,7 @@ fn main() {
             Ok(res) => {
                 view::display(&res);
             }
-            Err(e) => panic!(e),
+            Err(e) => panic!(e.to_string()),
         },
         Err(e) => panic!(e),
     }
