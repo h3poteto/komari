@@ -1,6 +1,8 @@
 use chrono::{DateTime, FixedOffset};
 use github_rs::client::{Executor, Github};
 use github_rs::errors::Error;
+use github_rs::HeaderMap;
+use regex::Regex;
 use serde_json::Value;
 use std::env;
 
@@ -10,6 +12,8 @@ pub enum PullsError {
     JsonError { error: String },
 
     EnvError { error: env::VarError },
+
+    LinkError { error: String },
 }
 
 impl From<Error> for PullsError {
@@ -30,6 +34,12 @@ impl From<env::VarError> for PullsError {
     }
 }
 
+impl From<LinkError> for PullsError {
+    fn from(err: LinkError) -> Self {
+        PullsError::LinkError { error: err.error }
+    }
+}
+
 struct JsonError {
     error: String,
 }
@@ -40,42 +50,97 @@ impl JsonError {
     }
 }
 
+struct LinkError {
+    error: String,
+}
+
+impl LinkError {
+    fn new(err: String) -> LinkError {
+        LinkError { error: err }
+    }
+}
+
 pub struct Pulls {
     owner: String,
     repo: String,
+    client: Github,
 }
 
 impl Pulls {
-    pub fn new(owner: &String, repo: &String) -> Self {
-        Pulls {
-            owner: owner.to_string(),
-            repo: repo.to_string(),
-        }
-    }
-
-    pub fn list(&self) -> Result<Value, PullsError> {
+    pub fn new(owner: &String, repo: &String) -> Result<Self, PullsError> {
         let github_token = env::var("GITHUB_TOKEN")?;
         let client = Github::new(github_token)?;
+        Ok(Pulls {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            client: client,
+        })
+    }
 
+    pub fn list_pulls_since(&self, since: &i64) -> Result<Vec<Value>, PullsError> {
         // https://github.com/github-rs/github-rs/blob/master/src/repos/get.rs#L265
         // Pulls does not provide reference parameter, so we can't provide query parameter.
         let pulls_url = format!(
             "repos/{}/{}/pulls?state=closed&sort=updated&direction=desc",
             self.owner, self.repo
         );
-        let response = client
-            .get()
-            .custom_endpoint(&pulls_url)
-            .execute::<Value>()?;
-        let (headers, status, json) = response;
+        self.list(&pulls_url, since)
+    }
+
+    fn list(&self, url: &String, since: &i64) -> Result<Vec<Value>, PullsError> {
+        let response = self.client.get().custom_endpoint(&url).execute::<Value>()?;
+        let (headers, _status, json) = response;
 
         if let Some(json) = json {
-            return Ok(json);
+            if let Some(array) = json.as_array() {
+                if self.include_target(array, since) {
+                    return Ok(array.to_vec());
+                } else {
+                    let next_url = self.get_next_link(headers)?;
+                    let mut child = self.list(&next_url, since)?;
+                    let mut res = array.clone();
+                    res.append(&mut child);
+                    return Ok(res.to_vec());
+                }
+            }
         }
-        println!("{:#?}", headers);
-        println!("{}", status);
-        let err: JsonError = JsonError::new("json is empty".to_string());
-        Err(err.into())
+        let empty: Vec<Value> = vec![];
+        Ok(empty)
+    }
+
+    fn include_target(&self, array: &Vec<Value>, since: &i64) -> bool {
+        if let Some(_find) = array
+            .iter()
+            .find(|a| a["number"].as_i64().unwrap() == since.to_owned())
+        {
+            return true;
+        }
+        false
+    }
+
+    fn get_next_link(&self, headers: HeaderMap) -> Result<String, LinkError> {
+        if let Ok(link) = headers
+            .get::<&str>("link")
+            .ok_or("link does not exist".to_owned())
+            .and_then(|l| l.to_str().map_err(|e| e.to_string()))
+            .and_then(|l| parse_link_header::parse(l).map_err(|_e| "failed to parse".to_owned()))
+        {
+            let next: Option<String> = Some("next".to_string());
+            if let Some(value) = link.get(&next) {
+                let uri = value.uri.to_string().clone();
+                let re = Regex::new(r"^https://api\.github\.com/(.*)$").unwrap();
+                return re
+                    .captures(&uri)
+                    .ok_or(LinkError::new("could not found url".to_string()))
+                    .and_then(|r| {
+                        r.get(1)
+                            .ok_or(LinkError::new("failed to parse url".to_string()))
+                    })
+                    .map(|p| p.as_str().to_string());
+            }
+        }
+        let err: LinkError = LinkError::new("link not found".to_string());
+        Err(err)
     }
 
     pub fn get(&self, number: &i64) -> Result<Value, PullsError> {
@@ -105,7 +170,7 @@ impl Pulls {
         let since = self.get(number)?;
         if let Ok(since_date) = since["merged_at"]
             .as_str()
-            .ok_or("error".to_owned())
+            .ok_or("merged_at does not exist".to_owned())
             .and_then(|m| DateTime::parse_from_rfc3339(&m).map_err(|e| e.to_string()))
         {
             let res: Vec<Value> = array
