@@ -1,64 +1,10 @@
+use crate::errors::{JsonError, LinkError, PullsError};
 use chrono::{DateTime, FixedOffset};
 use github_rs::client::{Executor, Github};
-use github_rs::errors::Error;
 use github_rs::HeaderMap;
 use regex::Regex;
 use serde_json::Value;
 use std::env;
-
-pub enum PullsError {
-    GitHubError { error: Error },
-
-    JsonError { error: String },
-
-    EnvError { error: env::VarError },
-
-    LinkError { error: String },
-}
-
-impl From<Error> for PullsError {
-    fn from(error: Error) -> Self {
-        PullsError::GitHubError { error }
-    }
-}
-
-impl From<JsonError> for PullsError {
-    fn from(err: JsonError) -> Self {
-        PullsError::JsonError { error: err.error }
-    }
-}
-
-impl From<env::VarError> for PullsError {
-    fn from(error: env::VarError) -> Self {
-        PullsError::EnvError { error }
-    }
-}
-
-impl From<LinkError> for PullsError {
-    fn from(err: LinkError) -> Self {
-        PullsError::LinkError { error: err.error }
-    }
-}
-
-struct JsonError {
-    error: String,
-}
-
-impl JsonError {
-    fn new(err: String) -> JsonError {
-        JsonError { error: err }
-    }
-}
-
-struct LinkError {
-    error: String,
-}
-
-impl LinkError {
-    fn new(err: String) -> LinkError {
-        LinkError { error: err }
-    }
-}
 
 pub struct Pulls {
     owner: String,
@@ -89,7 +35,11 @@ impl Pulls {
 
     fn list(&self, url: &String, since: &i64) -> Result<Vec<Value>, PullsError> {
         let response = self.client.get().custom_endpoint(&url).execute::<Value>()?;
-        let (headers, _status, json) = response;
+        let (headers, status, json) = response;
+        if !status.is_success() {
+            let err: JsonError = JsonError::new(format!("Status code is {}", status.as_u16()));
+            return Err(err.into());
+        }
 
         if let Some(json) = json {
             if let Some(array) = json.as_array() {
